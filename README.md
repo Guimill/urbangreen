@@ -132,7 +132,7 @@ staff login (`/admin/`), because every analysis downloads imagery for several mi
 own password with:
 
 ```powershell
-ssh -i "$HOME\.ssh\cv_deploy_ed25519" root@194.164.199.244 "cd /srv/urbangreen && docker compose exec -it web python manage.py changepassword admin"
+ssh -t -i "$HOME\.ssh\cv_deploy_ed25519" root@194.164.199.244 "cd /srv/urbangreen && docker compose exec web python manage.py changepassword admin"
 ```
 
 
