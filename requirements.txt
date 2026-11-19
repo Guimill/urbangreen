@@ -1,0 +1,7 @@
+Django>=6.1,<6.2
+numpy>=2.5
+rasterio>=1.5
+shapely>=2.2
+pyproj>=3.8
+requests>=2.34
+pillow>=13.0

@@ -1,0 +1,185 @@
+{% extends "monitor/base.html" %}
+{% load static humanize_fr %}
+{% block title %}{{ city.name }}{% endblock %}
+{% block head %}
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+{% endblock %}
+{% block content %}
+<div class="city-head">
+  <div>
+    <p class="crumb"><a href="{% url 'monitor:index' %}">Communes</a> /</p>
+    <h1>{{ city.name }} <span class="muted">({{ city.department }})</span></h1>
+    <p class="muted">
+      INSEE {{ city.code }} · {{ city.population|thousands }} habitants
+      {% if city.osm_summary.all %} · {{ city.osm_summary.all.area_ha|thousands }} ha{% endif %}
+      · {{ scene_counts.ok }} date{{ scene_counts.ok|pluralize }} exploitable{{ scene_counts.ok|pluralize }}
+      {% if scene_counts.skipped %}({{ scene_counts.skipped }} trop nuageuse{{ scene_counts.skipped|pluralize }}){% endif %}
+    </p>
+  </div>
+  <a class="btn" href="#analyse">Lancer une analyse</a>
+</div>
+
+<div id="status" class="status{% if city.is_running %} status--running{% elif city.status == 'error' %} status--error{% endif %}"
+     role="status" aria-live="polite" {% if not city.is_running and city.status != 'error' %}hidden{% endif %}>
+  <span class="status__spinner" aria-hidden="true"></span>
+  <span id="status-text">{% if city.status == 'error' %}Erreur : {% endif %}{{ city.status_message }}</span>
+</div>
+
+{% if summary %}
+<section aria-label="Chiffres clés">
+  <div class="tiles">
+    <div class="tile">
+      <span class="tile__label">Surface végétalisée en été {{ summary.year }}</span>
+      <span class="tile__value">{{ summary.summer_green|percent }}</span>
+      <span class="tile__hint">part de la commune avec NDVI ≥ 0,3</span>
+    </div>
+    <div class="tile">
+      <span class="tile__label">… en hiver {{ summary.year }}</span>
+      <span class="tile__value">{{ summary.winter_green|percent }}</span>
+      <span class="tile__hint">décembre à février</span>
+    </div>
+    <div class="tile">
+      <span class="tile__label">Écart de NDVI été − hiver</span>
+      <span class="tile__value">{{ summary.amplitude_ndvi|signed }}</span>
+      <span class="tile__hint">moyenne de la commune</span>
+    </div>
+  </div>
+</section>
+{% endif %}
+
+{% if scene_counts.ok %}
+<section aria-labelledby="map-title">
+  <h2 id="map-title">Carte</h2>
+  <div class="map-tools">
+    <label>Couche
+      <select id="layer-kind">
+        <option value="diff">Écart été − hiver</option>
+        <option value="season">Saison (médiane des dates)</option>
+        <option value="date">Une date</option>
+        <option value="categories">Catégories d'espaces verts (OSM)</option>
+      </select>
+    </label>
+    <label id="layer-choice-wrap">
+      <span id="layer-choice-label">Année</span>
+      <select id="layer-choice"></select>
+    </label>
+    <label>Opacité <input id="opacity" type="range" min="0.2" max="1" step="0.1" value="0.85"></label>
+  </div>
+  <div class="map-wrap">
+    <div id="map" class="map" aria-label="Carte de la commune"></div>
+    <div id="legend" class="legend"></div>
+  </div>
+</section>
+
+<section aria-labelledby="seasons-title">
+  <div class="section-head">
+    <h2 id="seasons-title">Saisons</h2>
+    <label>Indicateur
+      <select id="metric">
+        <option value="green_share">Part végétalisée (NDVI ≥ 0,3)</option>
+        <option value="mean_ndvi">NDVI moyen</option>
+        <option value="dense_share">Végétation dense (NDVI ≥ 0,6)</option>
+      </select>
+    </label>
+  </div>
+  <p class="muted">Médiane des dates sans nuage de chaque saison. L'hiver d'une année va de décembre précédent à février.</p>
+  <div class="table-scroll">
+    <table class="heat" id="season-table"></table>
+  </div>
+
+  <h3>Écart entre l'été et l'hiver <span id="amp-year-wrap"><select id="amp-year" aria-label="Année"></select></span></h3>
+  <p class="muted">Plus la barre est longue, plus la végétation de la catégorie dépend des saisons (arbres à feuilles caduques, cultures, pelouses qui jaunissent…).</p>
+  <div class="chart chart--bars"><canvas id="amp-chart" role="img" aria-label="Écart été moins hiver par catégorie"></canvas></div>
+  <p id="amp-empty" class="muted" hidden>Il faut au moins un hiver et l'été suivant pour calculer l'écart.</p>
+</section>
+
+<section aria-labelledby="series-title">
+  <h2 id="series-title">Évolution date par date</h2>
+  <div class="chart chart--line"><canvas id="series-chart" role="img" aria-label="Évolution de l'indicateur par catégorie"></canvas></div>
+</section>
+{% else %}
+<section class="empty">
+  <h2>Pas encore de données</h2>
+  <p>Lancez l'analyse ci-dessous : la première fois, comptez quelques minutes (téléchargement des espaces verts
+    OpenStreetMap puis d'environ 3 images par mois).</p>
+</section>
+{% endif %}
+
+<section aria-labelledby="cat-title">
+  <h2 id="cat-title">Catégories</h2>
+  <div class="table-scroll">
+    <table class="plain">
+      <thead><tr><th scope="col">Catégorie</th><th scope="col">Contenu (OpenStreetMap)</th><th scope="col" class="num">Surface</th><th scope="col" class="num">Objets</th></tr></thead>
+      <tbody>
+        {% for c in categories %}
+          <tr>
+            <th scope="row"><span class="swatch swatch--{{ c.key }}" aria-hidden="true"></span>{{ c.label }}</th>
+            <td>{{ c.description|default:"Toute la commune" }}</td>
+            <td class="num">{% if c.area_ha is not None %}{{ c.area_ha|thousands }} ha{% else %}–{% endif %}</td>
+            <td class="num">{{ c.features|thousands }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if city.osm_fetched_at %}<p class="muted">Espaces verts téléchargés le {{ city.osm_fetched_at|date:"j F Y" }}.</p>{% endif %}
+</section>
+
+<section id="analyse" aria-labelledby="run-title">
+  <h2 id="run-title">Lancer une analyse</h2>
+  <p class="muted">Les dates déjà traitées ne sont pas retéléchargées : relancer l'analyse sur une période plus récente suffit pour suivre la commune.</p>
+  <form method="post" action="{% url 'monitor:run' city.code %}" class="run-form">
+    {% csrf_token %}
+    {% for field in form %}
+      <div class="field{% if field.name == 'refresh_osm' %} field--check{% endif %}">
+        {% if field.name == 'refresh_osm' %}{{ field }} <label for="{{ field.id_for_label }}">{{ field.label }}</label>{% else %}{{ field.label_tag }} {{ field }}{% endif %}
+        {% if field.help_text %}<small class="muted">{{ field.help_text }}</small>{% endif %}
+      </div>
+    {% endfor %}
+    <button class="btn btn--primary" type="submit" {% if city.is_running %}disabled{% endif %}>Analyser</button>
+  </form>
+</section>
+
+{% if scenes %}
+<section aria-labelledby="dates-title">
+  <details>
+    <summary><h2 id="dates-title" class="inline">Dates ({{ scenes|length }})</h2></summary>
+    <div class="table-scroll">
+      <table class="plain">
+        <thead><tr><th scope="col">Date</th><th scope="col">Saison</th><th scope="col">État</th><th scope="col" class="num">Visible</th><th scope="col" class="num">Nuages annoncés</th><th scope="col">Remarque</th></tr></thead>
+        <tbody>
+          {% for s in scenes %}
+            <tr>
+              <td>{% if s.status == 'ok' %}<a href="#map-title" data-date="{{ s.date|date:'Y-m-d' }}" class="show-date">{{ s.date|date:"d/m/Y" }}</a>{% else %}{{ s.date|date:"d/m/Y" }}{% endif %}</td>
+              <td>{{ s.season_label }}</td>
+              <td>{% if s.status == 'ok' %}✓ retenue{% elif s.status == 'skipped' %}écartée{% else %}erreur{% endif %}</td>
+              <td class="num">{{ s.valid_fraction|percent }}</td>
+              <td class="num">{{ s.cloud_cover|decimal:0 }} %</td>
+              <td class="muted">{{ s.message }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+</section>
+{% endif %}
+
+<section class="method" aria-labelledby="method-title">
+  <h2 id="method-title">Méthode</h2>
+  <ul>
+    <li>Images Sentinel-2 niveau 2A (réflectance de surface, collection 1), bandes rouge (B04) et proche infrarouge (B08) à 10&nbsp;m. NDVI = (PIR − R) / (PIR + R).</li>
+    <li>Les pixels nuageux, ombrés, enneigés ou sans donnée sont écartés grâce à la classification de scène (SCL) ; une date n'est retenue que si au moins 60&nbsp;% de la commune est visible. L'eau est exclue des moyennes.</li>
+    <li>Les catégories viennent d'OpenStreetMap ; un pixel recouvert par plusieurs objets est attribué dans l'ordre arbres → parcs → autres espaces verts → agricole. Les arbres isolés comptent pour un disque de 4&nbsp;m de rayon.</li>
+    <li>Les saisons sont météorologiques ; chaque valeur saisonnière est la médiane des dates de la saison, pour qu'une image un peu voilée ne la fausse pas.</li>
+  </ul>
+</section>
+{% endblock %}
+
+{% block scripts %}
+{{ config|json_script:"city-config" }}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<script src="{% static 'monitor/city.js' %}"></script>
+{% endblock %}

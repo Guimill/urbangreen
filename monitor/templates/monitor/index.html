@@ -1,0 +1,60 @@
+{% extends "monitor/base.html" %}
+{% load humanize_fr %}
+{% block content %}
+<section class="intro">
+  <h1>Suivre la végétation des villes au fil des saisons</h1>
+  <p>
+    Choisissez une commune française : l'application télécharge les images Sentinel-2 (10&nbsp;m),
+    calcule l'indice de végétation NDVI à chaque passage sans nuage et compare les saisons
+    pour les arbres, les parcs, les autres espaces verts et le reste de la ville.
+  </p>
+  <form class="search" method="get" action="{% url 'monitor:index' %}" role="search">
+    <label class="visually-hidden" for="q">Commune</label>
+    <input id="q" name="q" type="search" value="{{ query }}" placeholder="Nom de la commune, ex. Angers" required autofocus>
+    <button class="btn btn--primary" type="submit">Rechercher</button>
+  </form>
+
+  {% if error %}<p class="notice notice--error" role="alert">{{ error }}</p>{% endif %}
+  {% if query and not error %}
+    {% if results %}
+      <ul class="results">
+        {% for r in results %}
+          <li class="results__item">
+            <span><strong>{{ r.name }}</strong> <span class="muted">({{ r.department }}) · {{ r.population|thousands }} hab. · INSEE {{ r.code }}</span></span>
+            {% if r.known %}
+              <a class="btn" href="{% url 'monitor:city' r.code %}">Ouvrir</a>
+            {% else %}
+              <form method="post" action="{% url 'monitor:add_city' %}">{% csrf_token %}
+                <input type="hidden" name="code" value="{{ r.code }}">
+                <button class="btn btn--primary" type="submit">Suivre</button>
+              </form>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="notice">Aucune commune ne correspond à « {{ query }} ».</p>
+    {% endif %}
+  {% endif %}
+</section>
+
+<section>
+  <h2>Communes suivies</h2>
+  {% if cities %}
+    <ul class="cards">
+      {% for c in cities %}
+        <li>
+          <a class="card" href="{% url 'monitor:city' c.city.code %}">
+            <span class="card__title">{{ c.city.name }} <span class="muted">({{ c.city.department }})</span></span>
+            <span class="card__meta">{{ c.count }} date{{ c.count|pluralize }} analysée{{ c.count|pluralize }}</span>
+            <span class="card__meta">{% if c.last %}dernière image : {{ c.last.date|date:"j F Y" }}{% else %}pas encore analysée{% endif %}</span>
+            {% if c.city.is_running %}<span class="badge">analyse en cours</span>{% endif %}
+          </a>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="muted">Aucune commune pour l'instant : recherchez-en une ci-dessus.</p>
+  {% endif %}
+</section>
+{% endblock %}

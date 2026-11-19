@@ -1,0 +1,34 @@
+{% load static %}<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Végétation urbaine{% endblock %} · Sentinel-2</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='7' fill='%23008300'/></svg>">
+  <link rel="stylesheet" href="{% static 'monitor/app.css' %}">
+  {% block head %}{% endblock %}
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="{% url 'monitor:index' %}">
+      <span class="brand__dot" aria-hidden="true"></span>
+      Végétation urbaine <span class="brand__sub">Sentinel-2 · France</span>
+    </a>
+  </header>
+  <main class="page">
+    {% if messages %}
+      <ul class="flash">
+        {% for message in messages %}<li class="flash__item flash__item--{{ message.tags }}" role="status">{{ message }}</li>{% endfor %}
+      </ul>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="footer">
+    Images Copernicus Sentinel-2 (ESA) via
+    <a href="https://element84.com/earth-search/">Earth Search</a> ·
+    espaces verts © <a href="https://www.openstreetmap.org/copyright">contributeurs OpenStreetMap</a> ·
+    contours <a href="https://geo.api.gouv.fr">geo.api.gouv.fr</a>
+  </footer>
+  {% block scripts %}{% endblock %}
+</body>
+</html>
