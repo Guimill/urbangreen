@@ -66,6 +66,7 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+STATIC_ROOT.mkdir(exist_ok=True)  # whitenoise warns when it is missing
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage" if DEBUG
@@ -88,6 +89,8 @@ SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
 # analyses: each analysis downloads Sentinel-2 imagery for several minutes.
 WRITE_REQUIRES_LOGIN = os.environ.get("WRITE_REQUIRES_LOGIN", "0") == "1"
 LOGIN_URL = "admin:login"
+# Map images a visitor (not staff) may have computed per hour; already cached images are free.
+VISITOR_BUILDS_PER_HOUR = int(os.environ.get("VISITOR_BUILDS_PER_HOUR", "40"))
 
 if not DEBUG:  # behind Nginx Proxy Manager, which terminates HTTPS
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

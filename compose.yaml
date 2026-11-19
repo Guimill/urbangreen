@@ -8,6 +8,7 @@ services:
     volumes:
       - data:/data          # SQLite database + NDVI rasters, kept across updates
     mem_limit: 1500m
+    cpus: 1.0               # 2-core server shared with the other sites
     networks:
       mynetwork:
         aliases: [urbangreen]

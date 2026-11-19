@@ -1,7 +1,10 @@
+import threading
+
 import numpy as np
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.views import redirect_to_login
+from django.core.cache import cache
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -15,7 +18,8 @@ from .services import analysis, communes, pipeline, raster
 
 
 def index(request):
-    query = request.GET.get("q", "").strip()
+    # the commune search calls geo.api.gouv.fr: only offered to those who can add a commune
+    query = request.GET.get("q", "").strip() if can_edit(request) else ""
     results, error = [], None
     if query:
         try:
@@ -140,16 +144,56 @@ def _masks(city):
         raise Http404("Masques absents : lancez l'analyse")
 
 
-def _cached(city, name, build):
+# Images are computed on first request, then served from the disk cache. Building one
+# costs up to a few seconds of CPU, so visitors may only trigger a limited number of
+# builds, and builds run one at a time: a visitor clicking through every season pair
+# cannot take more than one CPU core, and cached images are always served at once.
+_BUILD_LOCK = threading.Semaphore(1)
+
+
+def client_ip(request):
+    # Nginx Proxy Manager appends the real client address last; earlier entries can be forged
+    forwarded = [p.strip() for p in request.META.get("HTTP_X_FORWARDED_FOR", "").split(",") if p.strip()]
+    return forwarded[-1] if forwarded else request.META.get("REMOTE_ADDR", "")
+
+
+def _allow_build(request):
+    if request.user.is_staff:
+        return True
+    key = f"builds:{client_ip(request)}"
+    cache.add(key, 0, 3600)
+    try:
+        count = cache.incr(key)
+    except ValueError:  # expired between add and incr
+        cache.set(key, 1, 3600)
+        count = 1
+    return count <= settings.VISITOR_BUILDS_PER_HOUR
+
+
+def _too_busy(message):
+    response = HttpResponse(message, status=429, content_type="text/plain; charset=utf-8")
+    response["Retry-After"] = "600"
+    return response
+
+
+def _cached(request, city, name, build):
     path = city.raster_dir / "cache" / name
     if not path.exists():
-        content = build()
-        if content is None:
-            raise Http404("Pas de données")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_bytes(content)
-        tmp.replace(path)
+        if not _allow_build(request):
+            return _too_busy("Trop de nouvelles images demandées : réessayez dans une heure.")
+        if not _BUILD_LOCK.acquire(timeout=30):
+            return _too_busy("Serveur occupé : réessayez dans un instant.")
+        try:
+            if not path.exists():  # built by another request while this one waited
+                content = build()
+                if content is None:
+                    raise Http404("Pas de données")
+                path.parent.mkdir(parents=True, exist_ok=True)
+                tmp = path.with_suffix(".tmp")
+                tmp.write_bytes(content)
+                tmp.replace(path)
+        finally:
+            _BUILD_LOCK.release()
     return _png(path.read_bytes(), cache=True)
 
 
@@ -163,7 +207,7 @@ def scene_png(request, code, day):
             values = raster.dequantize(d["ndvi"])
     except OSError:
         raise Http404("Raster absent")
-    return _cached(city, f"scene-{scene.date}-{scene.pk}.png", lambda: raster.ndvi_png(values, masks.inside))
+    return _cached(request, city, f"scene-{scene.date}-{scene.pk}.png", lambda: raster.ndvi_png(values, masks.inside))
 
 
 def _season(key):
@@ -190,7 +234,7 @@ def season_png(request, code, key):
         values, _ = analysis.season_composite(city, year, season)
         return None if values is None else raster.ndvi_png(values, masks.inside)
 
-    return _cached(city, f"season-{key}-{analysis.composite_version(scenes)}.png", build)
+    return _cached(request, city, f"season-{key}-{analysis.composite_version(scenes)}.png", build)
 
 
 @require_GET
@@ -209,7 +253,7 @@ def diff_png(request, code, a, b):
         return None if va is None or vb is None else raster.diff_png(vb - va, masks.inside)
 
     version = f"{analysis.composite_version(scenes_a)}-{analysis.composite_version(scenes_b)}"
-    return _cached(city, f"diff-{a}-{b}-{version}.png", build)
+    return _cached(request, city, f"diff-{a}-{b}-{version}.png", build)
 
 
 @require_GET
@@ -217,5 +261,5 @@ def categories_png(request, code):
     city = get_object_or_404(City, code=code)
     masks = _masks(city)
     stamp = int(city.osm_fetched_at.timestamp()) if city.osm_fetched_at else 0
-    return _cached(city, f"categories-{stamp}.png", lambda: raster.categories_png(masks.categories, masks.inside))
+    return _cached(request, city, f"categories-{stamp}.png", lambda: raster.categories_png(masks.categories, masks.inside))
 

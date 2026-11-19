@@ -181,3 +181,55 @@ class WritePermissionTests(TestCase):
             self.client.post(reverse("monitor:run", args=["49007"]),
                              {"start": "2025-01-01", "end": "2025-08-31", "max_cloud": 40, "per_month": 3})
             start.assert_called_once()
+
+
+class VisitorLimitTests(TestCase):
+    """Visitors can only make the server compute a limited number of new images."""
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.tmp = tempfile.mkdtemp()
+        self.override = override_settings(RASTER_ROOT=self.tmp, VISITOR_BUILDS_PER_HOUR=2)
+        self.override.enable()
+        self.city = City.objects.create(code="49007", name="Angers", department="49", population=150000,
+                                        geometry=COMMUNE)
+        pipeline.update_city(self.city, date(2024, 12, 1), date(2025, 8, 31), log=lambda *a: None,
+                             reader=fake_reader, search=fake_search, fetch=fake_fetch)
+
+    def tearDown(self):
+        self.override.disable()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_new_images_are_limited_cached_ones_are_free(self):
+        code = self.city.code
+        urls = [reverse("monitor:diff_png", args=[code, "2025-winter", "2025-summer"]),
+                reverse("monitor:diff_png", args=[code, "2025-spring", "2025-summer"]),
+                reverse("monitor:diff_png", args=[code, "2025-winter", "2025-spring"])]
+        self.assertEqual(self.client.get(urls[0]).status_code, 200)
+        self.assertEqual(self.client.get(urls[1]).status_code, 200)
+        self.assertEqual(self.client.get(urls[2]).status_code, 429)   # third new image
+        self.assertEqual(self.client.get(urls[0]).status_code, 200)   # cached: still served
+        # another visitor (NPM puts the real address last) has their own allowance
+        other = self.client.get(urls[2], HTTP_X_FORWARDED_FOR="1.2.3.4, 5.6.7.8")
+        self.assertEqual(other.status_code, 200)
+
+    def test_staff_is_not_limited(self):
+        from django.contrib.auth.models import User
+        self.client.force_login(User.objects.create_user("admin", is_staff=True))
+        for a, b in [("2025-winter", "2025-summer"), ("2025-spring", "2025-summer"), ("2025-winter", "2025-spring")]:
+            self.assertEqual(self.client.get(reverse("monitor:diff_png", args=[self.city.code, a, b])).status_code, 200)
+
+    def test_season_composite_is_reused(self):
+        first, _ = analysis.season_composite(self.city, 2025, "summer")
+        with mock.patch.object(analysis, "_season_median") as median:
+            again, _ = analysis.season_composite(self.city, 2025, "summer")
+            median.assert_not_called()
+        np.testing.assert_allclose(first, again, atol=0.006)
+
+    @override_settings(WRITE_REQUIRES_LOGIN=True)
+    def test_visitors_cannot_search(self):
+        with mock.patch("monitor.services.communes.search") as search:
+            page = self.client.get(reverse("monitor:index") + "?q=nantes").content.decode()
+            search.assert_not_called()
+        self.assertNotIn('role="search"', page)

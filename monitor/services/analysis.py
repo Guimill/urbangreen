@@ -102,8 +102,33 @@ def season_scenes(city, year, season):
 
 
 def season_composite(city, year, season):
-    """Median NDVI of a season, or None when no date is available."""
+    """Median NDVI of a season, or None when no date is available.
+
+    Stored in the cache folder (int8, ~100 KB) so that comparing two seasons only reads two files.
+    """
     scenes = season_scenes(city, year, season)
+    if not scenes:
+        return None, scenes
+    folder = city.raster_dir / "cache"
+    path = folder / f"composite-{year}-{season}-{composite_version(scenes)}.npz"
+    try:
+        with np.load(path) as d:
+            return raster.dequantize(d["ndvi"]), scenes
+    except (OSError, KeyError, ValueError):
+        pass
+    values = _season_median(scenes)
+    if values is not None:
+        folder.mkdir(parents=True, exist_ok=True)
+        for old in folder.glob(f"composite-{year}-{season}-*.npz"):  # older versions of this season
+            old.unlink(missing_ok=True)
+        tmp = folder / (path.name + ".tmp")
+        with open(tmp, "wb") as f:
+            np.savez_compressed(f, ndvi=raster.quantize(values))
+        tmp.replace(path)
+    return values, scenes
+
+
+def _season_median(scenes):
     stack = []
     for scene in scenes[-MAX_COMPOSITE_SCENES:]:
         try:
@@ -111,7 +136,7 @@ def season_composite(city, year, season):
                 stack.append(data["ndvi"])
         except OSError:
             continue
-    return (raster.composite(stack), scenes) if stack else (None, scenes)
+    return raster.composite(stack) if stack else None
 
 
 def composite_version(scenes):

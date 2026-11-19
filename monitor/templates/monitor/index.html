@@ -8,6 +8,7 @@
     calcule l'indice de végétation NDVI à chaque passage sans nuage et compare les saisons
     pour les arbres, les parcs, les autres espaces verts et le reste de la ville.
   </p>
+  {% if can_edit %}
   <form class="search" method="get" action="{% url 'monitor:index' %}" role="search">
     <label class="visually-hidden" for="q">Commune</label>
     <input id="q" name="q" type="search" value="{{ query }}" placeholder="Nom de la commune, ex. Angers" required autofocus>
@@ -38,6 +39,9 @@
       <p class="notice">Aucune commune ne correspond à « {{ query }} ».</p>
     {% endif %}
   {% endif %}
+  {% else %}
+  <p class="muted">Les communes sont ajoutées et analysées par les administrateurs du site.</p>
+  {% endif %}
 </section>
 
 <section>
@@ -56,7 +60,7 @@
       {% endfor %}
     </ul>
   {% else %}
-    <p class="muted">Aucune commune pour l'instant : recherchez-en une ci-dessus.</p>
+    <p class="muted">Aucune commune pour l'instant.</p>
   {% endif %}
 </section>
 {% endblock %}

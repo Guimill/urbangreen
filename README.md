@@ -135,6 +135,25 @@ own password with:
 ssh -t -i "$HOME\.ssh\cv_deploy_ed25519" root@194.164.199.244 "cd /srv/urbangreen && docker compose exec web python manage.py changepassword admin"
 ```
 
+**Where the data lives, and what visitors can make the server do**
+
+Everything is on the server, in the Docker volume `urbangreen_data` (about 100 MB for Angers +
+Nantes): the database, one compressed NDVI raster per date, and a `cache/` folder of seasonal
+composites and map images. Nothing is fetched from outside when a visitor browses.
+
+| Action | Who | Cost |
+|---|---|---|
+| Search a commune (calls geo.api.gouv.fr) | admins only — hidden for visitors | — |
+| Add a commune, launch an analysis (downloads Sentinel-2) | admins only | minutes |
+| Open a page, the data, an image already computed | everyone | read from disk |
+| First display of a season, a comparison or a date | visitors: 40 new images per hour per address, then HTTP 429; admins: unlimited | ~0.2–3 s of CPU, once |
+
+Images are built one at a time and the container is capped at **1 CPU and 1.5 GB of RAM**
+(`compose.yaml`), so even a visitor clicking through every pair of seasons cannot slow down the
+other sites of the server. The number of possible images is finite (seasons² + dates per
+commune, a few hundred KB each) and each is computed only once. The hourly allowance is set by
+`VISITOR_BUILDS_PER_HOUR` in `.env`.
+
 
 ---
 

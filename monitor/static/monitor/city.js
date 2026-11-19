@@ -160,6 +160,9 @@
       latest = next;
       // remove the old image only once the new one is there (turning the clock does not flash the
       // base map); an image overtaken by a newer request while loading removes itself
+      next.once("error", () => {
+        if (next === latest) legend.insertAdjacentHTML("afterbegin", '<span class="legend__warn" role="status">Image non disponible pour le moment (trop de demandes) : réessayez plus tard.</span>');
+      });
       next.once("load error", () => {
         if (next !== latest) return map.removeLayer(next);
         if (overlay) map.removeLayer(overlay);
