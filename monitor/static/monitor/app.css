@@ -39,6 +39,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body { margin: 0; background: var(--page); color: var(--ink); line-height: 1.5; }
 a { color: inherit; text-underline-offset: 2px; }
 h1 { font-size: clamp(1.6rem, 4vw, 2.2rem); line-height: 1.15; margin: 0 0 0.4rem; text-wrap: balance; }
@@ -164,3 +165,59 @@ details summary h2 { margin-left: 0.3rem; }
   .map-tools select { flex: 1; }
 }
 .leaflet-image-layer.pixelated { image-rendering: pixelated; }
+
+/* season clocks */
+.map-layout { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1rem; align-items: start; }
+.map-layout > .clocks[hidden] { display: none; }
+.map-layout:has(> .clocks[hidden]) { grid-template-columns: minmax(0, 1fr); }
+.clocks { display: flex; flex-direction: column; align-items: center; gap: 0.6rem; padding: 0.8rem 0.6rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.clocks__group { display: flex; flex-direction: column; align-items: center; gap: 0.3rem; }
+.clocks__group[hidden] { display: none; }
+.clocks--row, .clocks--row .clocks__group, .clocks__group--pair { flex-direction: row; flex-wrap: nowrap; justify-content: center; }
+.map-layout .clocks__group--pair { flex-direction: column; }
+.compare { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1rem; align-items: center; margin-top: 0.6rem; }
+.compare[hidden] { display: none; }
+.compare .chart { margin-top: 0; }
+
+.clock { display: flex; flex-direction: column; align-items: center; gap: 0.15rem; width: 150px; }
+.clock__head { display: flex; align-items: center; gap: 0.4rem; font-weight: 600; font-size: 0.92rem; white-space: nowrap; }
+.clock__tag { display: inline-grid; place-items: center; width: 1.35rem; height: 1.35rem; border-radius: 50%; background: var(--ink); color: var(--page); font-size: 0.75rem; }
+.clock__face { width: 100%; height: auto; overflow: visible; touch-action: manipulation; }
+.clock__rim { fill: var(--surface); stroke: var(--axis); stroke-width: 1; }
+.clock__tick { stroke: var(--axis); stroke-width: 0.8; }
+.clock__tick--season { stroke: var(--muted); stroke-width: 1.4; }
+.clock__season { cursor: pointer; outline: none; }
+.clock__season path { fill: var(--surface-2); stroke: var(--surface); stroke-width: 1; transition: fill 0.15s; }
+.clock__season:hover path { fill: var(--grid); }
+.clock__season text { font-size: 8.5px; font-weight: 600; text-anchor: middle; dominant-baseline: central; fill: var(--ink-2); pointer-events: none; }
+.clock__season.is-on path { fill: var(--accent); }
+.clock__season.is-on text { fill: var(--accent-ink); }
+.clock__season.is-off { cursor: not-allowed; }
+.clock__season.is-off path { fill: transparent; stroke: var(--grid); stroke-dasharray: 2 2; }
+.clock__season.is-off text { fill: var(--muted); opacity: 0.6; }
+.clock__season:focus-visible path { stroke: var(--cat-all); stroke-width: 2.5; }
+.clock__date { fill: var(--ink-2); }
+.clock__hand { transform-box: view-box; transform-origin: 60px 60px; transition: transform 0.4s cubic-bezier(0.3, 1.3, 0.5, 1); pointer-events: none; }
+.clock__hand path { fill: var(--ink); }
+.clock__hub { fill: var(--surface); stroke: var(--axis); stroke-width: 1; }
+.clock__hub-text { font-size: 7.5px; font-weight: 700; text-anchor: middle; dominant-baseline: central; fill: var(--ink); }
+.clock__years { display: flex; align-items: center; gap: 0.5rem; font-variant-numeric: tabular-nums; font-weight: 600; }
+.clock__step { width: 2.2rem; height: 2.2rem; border-radius: 50%; border: 1px solid var(--axis); background: var(--surface); color: var(--ink); font: inherit; font-size: 1.2rem; line-height: 1; cursor: pointer; }
+.clock__step:hover:not(:disabled) { background: var(--surface-2); }
+.clock__step:disabled { opacity: 0.35; cursor: default; }
+.clock__count { font-size: 0.78rem; color: var(--muted); }
+.clock-swap { align-self: center; width: 2.2rem; height: 2.2rem; border-radius: 50%; border: 1px solid var(--axis); background: var(--surface); color: var(--ink); font-size: 1.05rem; cursor: pointer; }
+.clock-swap:hover { background: var(--surface-2); }
+.map-layout .clock-swap { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .clock__hand { transition: none; } }
+
+@media (max-width: 860px) {
+  .map-layout, .compare { grid-template-columns: minmax(0, 1fr); }
+  .map-layout .clocks__group--pair { flex-direction: row; }
+  .map-layout .clock-swap { transform: none; }
+  .clocks { padding: 0.6rem 0.4rem; }
+}
+@media (max-width: 420px) {
+  .clock { width: 132px; }
+  .clocks__group--pair { gap: 0.2rem; }
+}

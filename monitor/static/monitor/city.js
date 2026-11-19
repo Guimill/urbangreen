@@ -62,18 +62,48 @@
   }
 
   fetch(config.urls.data).then((r) => r.json()).then((data) => {
-    setupMap(data);
+    const clocks = setupClocks(data);
+    setupMap(data, clocks);
     const render = () => {
       renderSeasonTable(data, metricSelect.value);
-      renderAmplitude(data, metricSelect.value);
+      renderAmplitude(data, metricSelect.value, clocks);
       renderSeries(data, metricSelect.value);
     };
     metricSelect.addEventListener("change", render);
+    clocks.onChange((slot) => slot !== "single" && renderAmplitude(data, metricSelect.value, clocks));
     render();
   });
 
+  // ------------------------------------------------------------------ season clocks
+  // One shared state: "single" for the one-season map, "a" and "b" for every comparison
+  // (the map and the bar chart show the same pair, whichever clock is turned).
+  function setupClocks(data) {
+    const ov = data.overlays;
+    const seasons = ov.seasons.map((s) => ({ year: +s.key.slice(0, 4), season: s.key.slice(5) }));
+    const latest = seasons[seasons.length - 1];
+    const year = ov.diffs.length ? ov.diffs[ov.diffs.length - 1] : null;
+    return SeasonClocks(ov.seasons, ov.dates, {
+      single: latest,
+      a: year ? { year, season: "winter" } : seasons[Math.max(seasons.length - 2, 0)],
+      b: year ? { year, season: "summer" } : latest,
+    });
+  }
+
+  function comparePanel(host, clocks) {
+    clocks.clock(host, "a", "A");
+    const swap = document.createElement("button");
+    swap.type = "button";
+    swap.className = "clock-swap";
+    swap.textContent = "⇄";
+    swap.title = "Inverser A et B";
+    swap.setAttribute("aria-label", "Inverser A et B");
+    swap.addEventListener("click", () => clocks.swap("a", "b"));
+    host.appendChild(swap);
+    clocks.clock(host, "b", "B");
+  }
+
   // ------------------------------------------------------------------ map
-  function setupMap(data) {
+  function setupMap(data, clocks) {
     const map = L.map("map", { scrollWheelZoom: false, zoomSnap: 0.25 });
     L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 19,
@@ -83,39 +113,60 @@
     map.fitBounds(outline.getBounds(), { padding: [10, 10] });
 
     const kind = document.getElementById("layer-kind");
-    const choice = document.getElementById("layer-choice");
-    const choiceWrap = document.getElementById("layer-choice-wrap");
-    const choiceLabel = document.getElementById("layer-choice-label");
+    const dateSelect = document.getElementById("layer-date");
+    const dateWrap = document.getElementById("date-wrap");
     const opacity = document.getElementById("opacity");
     const legend = document.getElementById("legend");
     const ov = data.overlays;
-    let overlay = null;
+    let overlay = null, latest = null;
 
-    const options = {
-      diff: { label: "Année", items: ov.diffs.map((y) => [String(y), `Été ${y} − hiver ${y}`]) },
-      season: { label: "Saison", items: ov.seasons.map((s) => [s.key, `${s.label} (${s.count} date${s.count > 1 ? "s" : ""})`]) },
-      date: { label: "Date", items: ov.dates.map((d) => [d, new Date(d + "T12:00:00").toLocaleDateString("fr-FR")]) },
-      categories: { label: "", items: [] },
-    };
-    // no full year yet: start on the seasonal view
-    if (!ov.diffs.length) {
-      kind.querySelector('option[value="diff"]').disabled = true;
+    dateSelect.innerHTML = ov.dates.map((d) => `<option value="${d}">${new Date(d + "T12:00:00").toLocaleDateString("fr-FR")}</option>`).join("");
+    dateSelect.value = ov.dates[ov.dates.length - 1];
+    if (ov.seasons.length < 2) {
+      kind.querySelector('option[value="compare"]').disabled = true;
       kind.value = "season";
     }
 
-    function fillChoices() {
-      const o = options[kind.value];
-      choiceWrap.hidden = !o.items.length;
-      choiceLabel.textContent = o.label;
-      choice.innerHTML = o.items.map(([v, l]) => `<option value="${v}">${l}</option>`).join("");
-      if (o.items.length) choice.value = o.items[o.items.length - 1][0];
+    // the clock panel next to the map: one clock, two clocks or none, depending on the layer
+    const panel = document.getElementById("map-clocks");
+    const single = document.createElement("div");
+    single.className = "clocks__group";
+    clocks.clock(single, "single");
+    const pair = document.createElement("div");
+    pair.className = "clocks__group clocks__group--pair";
+    comparePanel(pair, clocks);
+    panel.append(single, pair);
+
+    function layout() {
+      single.hidden = kind.value !== "season";
+      pair.hidden = kind.value !== "compare";
+      panel.hidden = single.hidden && pair.hidden;
+      dateWrap.hidden = kind.value !== "date";
+      map.invalidateSize();
+    }
+
+    function url() {
+      const st = clocks.state;
+      switch (kind.value) {
+        case "compare": return config.urls.diff.replace("{a}", clocks.keyOf(st.a)).replace("{b}", clocks.keyOf(st.b));
+        case "season": return config.urls.season.replace("{key}", clocks.keyOf(st.single));
+        case "date": return config.urls.date.replace("{key}", dateSelect.value);
+        default: return config.urls.categories;
+      }
     }
 
     function show() {
-      if (overlay) map.removeLayer(overlay);
-      const url = kind.value === "categories" ? config.urls.categories : config.urls[kind.value].replace("{key}", choice.value);
-      overlay = L.imageOverlay(url, data.bounds, { opacity: +opacity.value, className: "pixelated" }).addTo(map);
-      outline.bringToFront();
+      const next = L.imageOverlay(url(), data.bounds, { opacity: +opacity.value, className: "pixelated" });
+      latest = next;
+      // remove the old image only once the new one is there (turning the clock does not flash the
+      // base map); an image overtaken by a newer request while loading removes itself
+      next.once("load error", () => {
+        if (next !== latest) return map.removeLayer(next);
+        if (overlay) map.removeLayer(overlay);
+        overlay = next;
+        outline.bringToFront();
+      });
+      next.addTo(map);
       renderLegend();
     }
 
@@ -127,24 +178,28 @@
         }).join("") + '<span class="legend__item muted">transparent : reste de la commune</span>';
         return;
       }
-      const isDiff = kind.value === "diff";
+      const isDiff = kind.value === "compare";
       const [lo, hi] = config.ranges[isDiff ? "diff" : "ndvi"];
       const stops = config.ramps[isDiff ? "diff" : "ndvi"];
       const n = (v) => (v > 0 && isDiff ? "+" : "") + nf(1).format(v);
+      const a = clocks.nameOf(clocks.state.a), b = clocks.nameOf(clocks.state.b);
       legend.innerHTML = `
-        <span>${isDiff ? "NDVI été − hiver" : "NDVI"}</span>
+        <span>${isDiff ? `NDVI ${b} − ${a}` : "NDVI"}</span>
         <span><span class="legend__bar" style="display:block;background:linear-gradient(to right, ${stops})"></span>
         <span class="legend__scale"><span>${n(lo)}</span><span>${isDiff ? "0" : n((lo + hi) / 2)}</span><span>${n(hi)}</span></span></span>
-        <span class="muted">${isDiff ? "vert : plus vert en été · orange : plus vert en hiver" : "clair : sol nu, bâti · foncé : végétation dense"}</span>`;
+        <span class="muted">${isDiff ? `vert : plus vert en ${b} (B) · orange : plus vert en ${a} (A)` : "clair : sol nu, bâti · foncé : végétation dense"}</span>`;
     }
 
-    kind.addEventListener("change", () => { fillChoices(); show(); });
-    choice.addEventListener("change", show);
-    opacity.addEventListener("input", () => overlay && overlay.setOpacity(+opacity.value));
-    document.querySelectorAll(".show-date").forEach((a) => a.addEventListener("click", () => {
-      kind.value = "date"; fillChoices(); choice.value = a.dataset.date; show();
+    kind.addEventListener("change", () => { layout(); show(); });
+    dateSelect.addEventListener("change", show);
+    clocks.onChange((slot) => {
+      if ((slot === "single" && kind.value === "season") || (slot !== "single" && kind.value === "compare")) show();
+    });
+    opacity.addEventListener("input", () => [overlay, latest].forEach((o) => o && o.setOpacity(+opacity.value)));
+    document.querySelectorAll(".show-date").forEach((link) => link.addEventListener("click", () => {
+      kind.value = "date"; dateSelect.value = link.dataset.date; layout(); show();
     }));
-    fillChoices();
+    layout();
     show();
   }
 
@@ -166,22 +221,29 @@
     table.innerHTML = `<thead><tr><th scope="col">Catégorie</th>${head}</tr></thead><tbody>${rows}</tbody>`;
   }
 
-  // ------------------------------------------------------------------ amplitude bars
+  // ------------------------------------------------------------------ difference bars (B − A)
   let ampChart = null;
+  let ampClocks = false;
   const SHORT_LABELS = { all: "Commune", trees: "Arbres", parks: "Parcs", other: "Autres verts", agri: "Agricole", unmapped: "Reste" };
-  const ampYear = document.getElementById("amp-year");
-  function renderAmplitude(data, metric) {
-    const empty = !data.amplitude.length;
+  function renderAmplitude(data, metric, clocks) {
+    const empty = data.seasons.length < 2;
     document.getElementById("amp-empty").hidden = !empty;
-    document.getElementById("amp-chart").parentElement.hidden = empty;
-    document.getElementById("amp-year-wrap").hidden = empty;
+    document.querySelector(".compare").hidden = empty;
     if (empty) return;
-    if (!ampYear.options.length) {
-      ampYear.innerHTML = data.amplitude.map((a) => `<option value="${a.year}">${a.year}</option>`).join("");
-      ampYear.value = data.amplitude[data.amplitude.length - 1].year;
-      ampYear.addEventListener("change", () => renderAmplitude(data, metricSelect.value));
+    if (!ampClocks) {
+      comparePanel(document.getElementById("amp-clocks"), clocks);
+      ampClocks = true;
     }
-    const year = data.amplitude.find((a) => String(a.year) === ampYear.value);
+    const { a, b } = clocks.state;
+    const sa = data.seasons.find((s) => s.key === clocks.keyOf(a));
+    const sb = data.seasons.find((s) => s.key === clocks.keyOf(b));
+    const diff = (key) => {
+      const x = sa ? sa.values[key][metric] : null, y = sb ? sb.values[key][metric] : null;
+      return x === null || y === null ? null : y - x;
+    };
+    const year = { label: `${clocks.nameOf(b)} − ${clocks.nameOf(a)}`,
+                   values: Object.fromEntries(data.categories.map((c) => [c.key, { [metric]: diff(c.key) }])) };
+    document.getElementById("amp-title").textContent = `Écart ${year.label}`;
     const cats = data.categories;
     const values = cats.map((c) => year.values[c.key][metric]);
     const scale = METRICS[metric].percent ? 100 : 1;
@@ -201,7 +263,7 @@
         layout: { padding: { right: 8 } },
         plugins: {
           legend: { display: false },
-          tooltip: { callbacks: { label: (ctx) => `${fmtDiff(values[ctx.dataIndex], metric)} (été ${year.year} − hiver ${year.year})` } },
+          tooltip: { callbacks: { label: (ctx) => `${fmtDiff(values[ctx.dataIndex], metric)} (${year.label})` } },
         },
         scales: {
           // headroom on both sides so the value labels never run into the category names

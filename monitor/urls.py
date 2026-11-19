@@ -20,6 +20,6 @@ urlpatterns = [
     path("communes/<str:code>/donnees.json", views.data, name="data"),
     path("communes/<str:code>/ndvi/<isodate:day>.png", views.scene_png, name="scene_png"),
     path("communes/<str:code>/saison/<str:key>.png", views.season_png, name="season_png"),
-    path("communes/<str:code>/ecart/<int:year>.png", views.diff_png, name="diff_png"),
+    path("communes/<str:code>/ecart/<str:a>/<str:b>.png", views.diff_png, name="diff_png"),
     path("communes/<str:code>/categories.png", views.categories_png, name="categories_png"),
 ]

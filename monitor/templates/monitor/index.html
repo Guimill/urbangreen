@@ -23,11 +23,13 @@
             <span><strong>{{ r.name }}</strong> <span class="muted">({{ r.department }}) · {{ r.population|thousands }} hab. · INSEE {{ r.code }}</span></span>
             {% if r.known %}
               <a class="btn" href="{% url 'monitor:city' r.code %}">Ouvrir</a>
-            {% else %}
+            {% elif can_edit %}
               <form method="post" action="{% url 'monitor:add_city' %}">{% csrf_token %}
                 <input type="hidden" name="code" value="{{ r.code }}">
                 <button class="btn btn--primary" type="submit">Suivre</button>
               </form>
+            {% else %}
+              <a class="btn" href="{% url 'admin:login' %}?next={{ request.get_full_path|urlencode }}">Se connecter pour suivre</a>
             {% endif %}
           </li>
         {% endfor %}

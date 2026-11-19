@@ -16,7 +16,7 @@
       {% if scene_counts.skipped %}({{ scene_counts.skipped }} trop nuageuse{{ scene_counts.skipped|pluralize }}){% endif %}
     </p>
   </div>
-  <a class="btn" href="#analyse">Lancer une analyse</a>
+  {% if can_edit %}<a class="btn" href="#analyse">Lancer une analyse</a>{% endif %}
 </div>
 
 <div id="status" class="status{% if city.is_running %} status--running{% elif city.status == 'error' %} status--error{% endif %}"
@@ -53,21 +53,21 @@
   <div class="map-tools">
     <label>Couche
       <select id="layer-kind">
-        <option value="diff">Écart été − hiver</option>
-        <option value="season">Saison (médiane des dates)</option>
+        <option value="compare">Comparer deux saisons</option>
+        <option value="season">Une saison (médiane des dates)</option>
         <option value="date">Une date</option>
         <option value="categories">Catégories d'espaces verts (OSM)</option>
       </select>
     </label>
-    <label id="layer-choice-wrap">
-      <span id="layer-choice-label">Année</span>
-      <select id="layer-choice"></select>
-    </label>
+    <label id="date-wrap" hidden>Date <select id="layer-date"></select></label>
     <label>Opacité <input id="opacity" type="range" min="0.2" max="1" step="0.1" value="0.85"></label>
   </div>
-  <div class="map-wrap">
-    <div id="map" class="map" aria-label="Carte de la commune"></div>
-    <div id="legend" class="legend"></div>
+  <div class="map-layout">
+    <div id="map-clocks" class="clocks" aria-label="Choix des saisons"></div>
+    <div class="map-wrap">
+      <div id="map" class="map" aria-label="Carte de la commune"></div>
+      <div id="legend" class="legend"></div>
+    </div>
   </div>
 </section>
 
@@ -87,10 +87,13 @@
     <table class="heat" id="season-table"></table>
   </div>
 
-  <h3>Écart entre l'été et l'hiver <span id="amp-year-wrap"><select id="amp-year" aria-label="Année"></select></span></h3>
-  <p class="muted">Plus la barre est longue, plus la végétation de la catégorie dépend des saisons (arbres à feuilles caduques, cultures, pelouses qui jaunissent…).</p>
-  <div class="chart chart--bars"><canvas id="amp-chart" role="img" aria-label="Écart été moins hiver par catégorie"></canvas></div>
-  <p id="amp-empty" class="muted" hidden>Il faut au moins un hiver et l'été suivant pour calculer l'écart.</p>
+  <h3 id="amp-title">Écart entre deux saisons</h3>
+  <p class="muted">Réglez les deux horloges : la barre montre <strong>B − A</strong> pour chaque catégorie. Vers la droite, la catégorie est plus verte en B ; vers la gauche, plus verte en A. Hiver → été de la même année mesure l'effet des saisons ; été → été de deux années montre l'effet d'une sécheresse.</p>
+  <div class="compare">
+    <div id="amp-clocks" class="clocks clocks--row"></div>
+    <div class="chart chart--bars"><canvas id="amp-chart" role="img" aria-label="Écart entre les deux saisons choisies, par catégorie"></canvas></div>
+  </div>
+  <p id="amp-empty" class="muted" hidden>Il faut au moins deux saisons avec des images pour calculer un écart.</p>
 </section>
 
 <section aria-labelledby="series-title">
@@ -128,6 +131,7 @@
 <section id="analyse" aria-labelledby="run-title">
   <h2 id="run-title">Lancer une analyse</h2>
   <p class="muted">Les dates déjà traitées ne sont pas retéléchargées : relancer l'analyse sur une période plus récente suffit pour suivre la commune.</p>
+  {% if can_edit %}
   <form method="post" action="{% url 'monitor:run' city.code %}" class="run-form">
     {% csrf_token %}
     {% for field in form %}
@@ -138,6 +142,10 @@
     {% endfor %}
     <button class="btn btn--primary" type="submit" {% if city.is_running %}disabled{% endif %}>Analyser</button>
   </form>
+  {% else %}
+  <p class="notice">Le lancement des analyses est réservé aux administrateurs du site.
+    <a href="{% url 'admin:login' %}?next={{ request.path|urlencode }}%23analyse">Se connecter</a></p>
+  {% endif %}
 </section>
 
 {% if scenes %}
@@ -181,5 +189,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<script src="{% static 'monitor/clock.js' %}"></script>
 <script src="{% static 'monitor/city.js' %}"></script>
 {% endblock %}

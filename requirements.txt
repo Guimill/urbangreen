@@ -5,3 +5,5 @@ shapely>=2.2
 pyproj>=3.8
 requests>=2.34
 pillow>=13.0
+gunicorn>=23.0
+whitenoise>=6.9

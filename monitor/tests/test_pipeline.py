@@ -112,7 +112,8 @@ class PipelineTests(TestCase):
 
         for url in [reverse("monitor:scene_png", args=[code, "2025-07-08"]),
                     reverse("monitor:season_png", args=[code, "2025-summer"]),
-                    reverse("monitor:diff_png", args=[code, 2025]),
+                    reverse("monitor:diff_png", args=[code, "2025-winter", "2025-summer"]),
+                    reverse("monitor:diff_png", args=[code, "2025-spring", "2025-summer"]),
                     reverse("monitor:categories_png", args=[code])]:
             response = self.client.get(url)
             self.assertEqual(response.status_code, 200, url)
@@ -123,7 +124,8 @@ class PipelineTests(TestCase):
         for url in [reverse("monitor:scene_png", args=[code, "2025-08-20"]),  # cloudy date
                     reverse("monitor:season_png", args=[code, "2025-autumn"]),
                     reverse("monitor:season_png", args=[code, "nonsense"]),
-                    reverse("monitor:diff_png", args=[code, 2024])]:
+                    reverse("monitor:diff_png", args=[code, "2024-winter", "2024-summer"]),
+                    reverse("monitor:diff_png", args=[code, "2025-winter", "nonsense"])]:
             self.assertEqual(self.client.get(url).status_code, 404, url)
 
     def test_run_view_starts_background_job_once(self):
@@ -148,3 +150,34 @@ class PipelineTests(TestCase):
         self.assertRedirects(response, reverse("monitor:city", args=["44184"]))
         self.assertEqual(City.objects.get(code="44184").name, "Saint-Nazaire")
         self.assertEqual(self.client.get(reverse("monitor:city", args=["44184"])).status_code, 200)
+
+
+class WritePermissionTests(TestCase):
+    """With WRITE_REQUIRES_LOGIN (production), visitors can read but not start downloads."""
+
+    def setUp(self):
+        self.city = City.objects.create(code="49007", name="Angers", department="49", population=150000,
+                                        geometry=COMMUNE)
+
+    @override_settings(WRITE_REQUIRES_LOGIN=True)
+    def test_visitors_are_sent_to_login(self):
+        with mock.patch.object(pipeline, "start_in_background") as start:
+            response = self.client.post(reverse("monitor:run", args=["49007"]),
+                                        {"start": "2025-01-01", "end": "2025-08-31", "max_cloud": 40, "per_month": 3})
+            start.assert_not_called()
+        self.assertIn("/admin/login/", response["Location"])
+        response = self.client.post(reverse("monitor:add_city"), {"code": "44184"})
+        self.assertIn("/admin/login/", response["Location"])
+        self.assertFalse(City.objects.filter(code="44184").exists())
+        page = self.client.get(reverse("monitor:city", args=["49007"])).content.decode()
+        self.assertNotIn('class="run-form"', page)
+        self.assertIn("réservé aux administrateurs", page)
+
+    @override_settings(WRITE_REQUIRES_LOGIN=True)
+    def test_staff_can_start_an_analysis(self):
+        from django.contrib.auth.models import User
+        self.client.force_login(User.objects.create_user("admin", is_staff=True))
+        with mock.patch.object(pipeline, "start_in_background") as start:
+            self.client.post(reverse("monitor:run", args=["49007"]),
+                             {"start": "2025-01-01", "end": "2025-08-31", "max_cloud": 40, "per_month": 3})
+            start.assert_called_once()

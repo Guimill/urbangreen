@@ -105,9 +105,8 @@ def parse(data):
     return out
 
 
-def fetch(south, west, north, east, log=print):
-    """Download the green features of a bounding box, trying every mirror a few times."""
-    query = build_query(south, west, north, east)
+def overpass(query, log=print):
+    """Run an Overpass query (JSON output), trying every mirror a few times."""
     errors = []
     for round_ in range(ROUNDS):
         for url in OVERPASS_URLS:
@@ -117,9 +116,14 @@ def fetch(south, west, north, east, log=print):
                 data = response.json()
                 if "remark" in data and not data.get("elements"):
                     raise ValueError(data["remark"])
-                return parse(data)
+                return data
             except (requests.RequestException, ValueError) as exc:
                 errors.append(f"{url}: {exc}")
                 log(f"OpenStreetMap : {url.split('/')[2]} indisponible, essai suivant…")
         time.sleep(5 * (round_ + 1))
     raise OsmError("Overpass API indisponible :\n" + "\n".join(errors[-len(OVERPASS_URLS):]))
+
+
+def fetch(south, west, north, east, log=print):
+    """Download the green features of a bounding box: {category code: [geometries]}."""
+    return parse(overpass(build_query(south, west, north, east), log=log))

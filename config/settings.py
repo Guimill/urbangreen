@@ -23,6 +23,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -42,6 +43,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "monitor.context.permissions",
             ],
         },
     },
@@ -64,6 +66,11 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage" if DEBUG
+                    else "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+}
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Rasters (NDVI per date, land-cover masks) and rendered overlays
@@ -76,3 +83,12 @@ STAC_COLLECTION = os.environ.get("STAC_COLLECTION", "sentinel-2-c1-l2a")
 # The OpenStreetMap tile servers refuse requests without a Referer header (tile usage policy).
 # Django's default ("same-origin") strips it on cross-origin requests; send only the origin instead.
 SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
+
+# On a public server, only staff users (Django admin login) may add communes and start
+# analyses: each analysis downloads Sentinel-2 imagery for several minutes.
+WRITE_REQUIRES_LOGIN = os.environ.get("WRITE_REQUIRES_LOGIN", "0") == "1"
+LOGIN_URL = "admin:login"
+
+if not DEBUG:  # behind Nginx Proxy Manager, which terminates HTTPS
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SESSION_COOKIE_SECURE = CSRF_COOKIE_SECURE = True

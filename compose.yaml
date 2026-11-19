@@ -1,0 +1,18 @@
+# Urban green monitor, behind Nginx Proxy Manager: forward urbangreen.mi-fan.fr to http://urbangreen:8000
+name: urbangreen
+services:
+  web:
+    build: .
+    restart: unless-stopped
+    env_file: .env          # SECRET_KEY, DEBUG=0, ALLOWED_HOSTS, CSRF_TRUSTED_ORIGINS, WRITE_REQUIRES_LOGIN=1
+    volumes:
+      - data:/data          # SQLite database + NDVI rasters, kept across updates
+    mem_limit: 1500m
+    networks:
+      mynetwork:
+        aliases: [urbangreen]
+volumes:
+  data:
+networks:
+  mynetwork:
+    external: true

@@ -1,10 +1,13 @@
 import numpy as np
+from django.conf import settings
 from django.contrib import messages
+from django.contrib.auth.views import redirect_to_login
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
 
+from .context import can_edit
 from .categories import CATEGORIES, CATEGORY_COLORS, CATEGORY_DESCRIPTIONS, DENSE_NDVI, GREEN_NDVI, SEASON_LABELS
 from .forms import RunForm
 from .models import City, Scene
@@ -30,6 +33,8 @@ def index(request):
 
 @require_POST
 def add_city(request):
+    if not can_edit(request):
+        return redirect_to_login(reverse("monitor:index"), settings.LOGIN_URL)
     code = request.POST.get("code", "").strip()
     city = City.objects.filter(code=code).first()
     if city is None:
@@ -60,7 +65,7 @@ def city_detail(request, code):
                 "status": reverse("monitor:status", args=[code]),
                 "date": reverse("monitor:scene_png", args=[code, "2000-01-01"]).replace("2000-01-01", "{key}"),
                 "season": reverse("monitor:season_png", args=[code, "KEY"]).replace("KEY", "{key}"),
-                "diff": reverse("monitor:diff_png", args=[code, 2000]).replace("2000", "{key}"),
+                "diff": reverse("monitor:diff_png", args=[code, "AAAA", "BBBB"]).replace("AAAA", "{a}").replace("BBBB", "{b}"),
                 "categories": reverse("monitor:categories_png", args=[code]),
             },
             "colors": CATEGORY_COLORS,
@@ -78,6 +83,8 @@ def city_detail(request, code):
 @require_POST
 def run(request, code):
     city = get_object_or_404(City, code=code)
+    if not can_edit(request):
+        return redirect_to_login(reverse("monitor:city", args=[code]), settings.LOGIN_URL)
     if city.is_running:
         messages.info(request, "Une analyse est déjà en cours.")
         return redirect("monitor:city", code=code)
@@ -187,21 +194,22 @@ def season_png(request, code, key):
 
 
 @require_GET
-def diff_png(request, code, year):
+def diff_png(request, code, a, b):
+    """NDVI of season b minus NDVI of season a (keys like "2026-winter")."""
     city = get_object_or_404(City, code=code)
-    summer = analysis.season_scenes(city, year, "summer")
-    winter = analysis.season_scenes(city, year, "winter")
-    if not (summer and winter):
+    (ya, sa), (yb, sb) = _season(a), _season(b)
+    scenes_a, scenes_b = analysis.season_scenes(city, ya, sa), analysis.season_scenes(city, yb, sb)
+    if not (scenes_a and scenes_b):
         raise Http404
     masks = _masks(city)
 
     def build():
-        s, _ = analysis.season_composite(city, year, "summer")
-        w, _ = analysis.season_composite(city, year, "winter")
-        return None if s is None or w is None else raster.diff_png(s - w, masks.inside)
+        va, _ = analysis.season_composite(city, ya, sa)
+        vb, _ = analysis.season_composite(city, yb, sb)
+        return None if va is None or vb is None else raster.diff_png(vb - va, masks.inside)
 
-    version = analysis.composite_version(summer + winter)
-    return _cached(city, f"diff-{year}-{version}.png", build)
+    version = f"{analysis.composite_version(scenes_a)}-{analysis.composite_version(scenes_b)}"
+    return _cached(city, f"diff-{a}-{b}-{version}.png", build)
 
 
 @require_GET
