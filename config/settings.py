@@ -72,3 +72,7 @@ RASTER_ROOT = DATA_DIR / "rasters"
 # Sentinel-2 source: Element 84 Earth Search (free, no account), collection 1 L2A
 STAC_URL = os.environ.get("STAC_URL", "https://earth-search.aws.element84.com/v1")
 STAC_COLLECTION = os.environ.get("STAC_COLLECTION", "sentinel-2-c1-l2a")
+
+# The OpenStreetMap tile servers refuse requests without a Referer header (tile usage policy).
+# Django's default ("same-origin") strips it on cross-origin requests; send only the origin instead.
+SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
