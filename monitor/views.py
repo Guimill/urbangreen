@@ -1,3 +1,4 @@
+import json
 import threading
 
 import numpy as np
@@ -12,7 +13,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from .context import can_edit
 from .categories import CATEGORIES, CATEGORY_COLORS, CATEGORY_DESCRIPTIONS, DENSE_NDVI, GREEN_NDVI, SEASON_LABELS
-from .forms import RunForm
+from .forms import HeatRunForm, RunForm
 from .models import City, Scene
 from .services import analysis, communes, pipeline, raster
 
@@ -59,6 +60,9 @@ def city_detail(request, code):
     return render(request, "monitor/city.html", {
         "city": city,
         "form": RunForm(),
+        "heat_form": HeatRunForm(prefix="heat"),
+        "heat_scenes": city.heat_scenes.order_by("-date")[:600],
+        "heat_count": city.heat_scenes.filter(status="ok").count(),
         "summary": analysis.summary_numbers(data),
         "scene_counts": {s: scenes.filter(status=s).count() for s in (Scene.OK, Scene.SKIPPED, Scene.ERROR)},
         "scenes": scenes[:300],
@@ -71,6 +75,8 @@ def city_detail(request, code):
                 "season": reverse("monitor:season_png", args=[code, "KEY"]).replace("KEY", "{key}"),
                 "diff": reverse("monitor:diff_png", args=[code, "AAAA", "BBBB"]).replace("AAAA", "{a}").replace("BBBB", "{b}"),
                 "categories": reverse("monitor:categories_png", args=[code]),
+                "heat": reverse("monitor:heat_data", args=[code]),
+                "heat_layer": reverse("monitor:heat_layer", args=[code, "MODE", "KEY"]).replace("MODE", "{mode}").replace("KEY", "{key}"),
             },
             "colors": CATEGORY_COLORS,
             "ramps": {"ndvi": raster.ramp_css(raster.NDVI_RAMP), "diff": raster.ramp_css(raster.DIFF_RAMP)},
@@ -104,6 +110,25 @@ def run(request, code):
     return redirect("monitor:city", code=code)
 
 
+@require_POST
+def run_heat(request, code):
+    city = get_object_or_404(City, code=code)
+    if not can_edit(request):
+        return redirect_to_login(reverse("monitor:city", args=[code]), settings.LOGIN_URL)
+    if city.is_running:
+        messages.info(request, "Une analyse est déjà en cours.")
+        return redirect("monitor:city", code=code)
+    form = HeatRunForm(request.POST, prefix="heat")
+    if not form.is_valid():
+        for errors in form.errors.values():
+            for error in errors:
+                messages.error(request, error)
+        return redirect("monitor:city", code=code)
+    d = form.cleaned_data
+    pipeline.start_in_background(city, d["start"], d["end"], job=pipeline.update_heat, max_cloud=d["max_cloud"])
+    return redirect(reverse("monitor:city", args=[code]) + "#chaleur")
+
+
 @require_GET
 def status(request, code):
     city = get_object_or_404(City, code=code)
@@ -131,8 +156,8 @@ def data(request, code):
 # --------------------------------------------------------------------------- #
 # Map overlays (PNG on the city grid, cached on disk)
 # --------------------------------------------------------------------------- #
-def _png(content, cache=None):
-    response = HttpResponse(content, content_type="image/png")
+def _png(content, cache=None, content_type="image/png"):
+    response = HttpResponse(content, content_type=content_type)
     response["Cache-Control"] = "private, max-age=3600" if cache else "no-cache"
     return response
 
@@ -176,7 +201,7 @@ def _too_busy(message):
     return response
 
 
-def _cached(request, city, name, build):
+def _cached(request, city, name, build, content_type="image/png"):
     path = city.raster_dir / "cache" / name
     if not path.exists():
         if not _allow_build(request):
@@ -194,7 +219,7 @@ def _cached(request, city, name, build):
                 tmp.replace(path)
         finally:
             _BUILD_LOCK.release()
-    return _png(path.read_bytes(), cache=True)
+    return _png(path.read_bytes(), cache=True, content_type=content_type)
 
 
 @require_GET
@@ -263,3 +288,32 @@ def categories_png(request, code):
     stamp = int(city.osm_fetched_at.timestamp()) if city.osm_fetched_at else 0
     return _cached(request, city, f"categories-{stamp}.png", lambda: raster.categories_png(masks.categories, masks.inside))
 
+
+
+# --------------------------------------------------------------------------- #
+# Heat islands
+# --------------------------------------------------------------------------- #
+@require_GET
+def heat_data(request, code):
+    city = get_object_or_404(City, code=code)
+    overview = analysis.heat_overview(city)
+    if overview is None:
+        raise Http404("Pas de données de chaleur")
+    return JsonResponse(overview)
+
+
+@require_GET
+def heat_layer(request, code, mode, key):
+    """Cell values of one heat layer (JSON, cached on disk like the images)."""
+    city = get_object_or_404(City, code=code)
+    selection = analysis.heat_layer_scenes(city, mode, key)
+    if selection is None:
+        raise Http404
+    chosen, others = selection
+    season, year = chosen[0].season
+    version = f"{analysis.heat_version(city)}-{analysis.composite_version(analysis.season_scenes(city, year, season))}"
+
+    def build():
+        return json.dumps(analysis.heat_layer(city, mode, key, chosen, others), separators=(",", ":")).encode()
+
+    return _cached(request, city, f"heat-{mode}-{key}-{version}.json", build, content_type="application/json")

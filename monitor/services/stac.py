@@ -15,16 +15,19 @@ class StacError(RuntimeError):
     pass
 
 
-def search(bbox, start: date, end: date, max_cloud=40):
-    """All L2A items intersecting bbox (west, south, east, north) between two dates."""
+def search(bbox, start: date, end: date, max_cloud=40, url=None, collection=None, query=None):
+    """All items intersecting bbox (west, south, east, north) between two dates.
+
+    Sentinel-2 L2A from the default STAC API, or any collection of another API (Landsat for heat).
+    """
     body = {
-        "collections": [settings.STAC_COLLECTION],
+        "collections": [collection or settings.STAC_COLLECTION],
         "bbox": list(bbox),
         "datetime": f"{start.isoformat()}T00:00:00Z/{end.isoformat()}T23:59:59Z",
-        "query": {"eo:cloud_cover": {"lt": max_cloud}},
+        "query": {"eo:cloud_cover": {"lt": max_cloud}, **(query or {})},
         "limit": 100,
     }
-    url, method, items = f"{settings.STAC_URL}/search", "POST", []
+    url, method, items = f"{url or settings.STAC_URL}/search", "POST", []
     for _ in range(MAX_PAGES):
         try:
             if method == "POST":
@@ -34,7 +37,7 @@ def search(bbox, start: date, end: date, max_cloud=40):
             response.raise_for_status()
             page = response.json()
         except (requests.RequestException, ValueError) as exc:
-            raise StacError(f"Recherche Sentinel-2 impossible : {exc}") from exc
+            raise StacError(f"Recherche d'images satellite impossible : {exc}") from exc
         items.extend(page.get("features", []))
         nxt = next((link for link in page.get("links", []) if link.get("rel") == "next"), None)
         if not nxt or not page.get("features"):

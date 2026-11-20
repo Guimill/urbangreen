@@ -1,12 +1,13 @@
 """Aggregations for the pages: time series, seasonal summaries and seasonal composites."""
 from collections import defaultdict
+from datetime import date
 from statistics import median
 
 import numpy as np
 
-from ..categories import CATEGORIES, SEASON_ORDER, season_label
-from ..models import Scene
-from . import raster
+from ..categories import CATEGORIES, SEASON_LABELS, SEASON_ORDER, season_label
+from ..models import HeatScene, Scene
+from . import heat, raster
 
 METRICS = ("mean_ndvi", "green_share", "dense_share")
 MAX_COMPOSITE_SCENES = 15
@@ -156,3 +157,117 @@ def overlays(city):
         "diffs": years,
     }
 
+
+
+# --------------------------------------------------------------------------- #
+# Heat islands (Landsat surface temperature on 200 m cells)
+# --------------------------------------------------------------------------- #
+def _cells_json(values, digits=2):
+    """2-D array -> nested lists, None where NaN (JSON has no NaN)."""
+    values = values.astype("float64")
+    out = np.round(values, digits).astype(object)
+    out[~np.isfinite(values)] = None
+    return out.tolist()
+
+
+def heat_scenes(city):
+    return list(city.heat_scenes.filter(status=HeatScene.OK).order_by("date"))
+
+
+def heat_version(city):
+    scenes = city.heat_scenes.filter(status=HeatScene.OK)
+    return f"{scenes.count()}-{max(scenes.values_list('pk', flat=True), default=0)}"
+
+
+def _mean(values, digits=1):
+    values = [v for v in values if v is not None]
+    return round(sum(values) / len(values), digits) if values else None
+
+
+def heat_masks(city):
+    from .pipeline import Masks
+    return heat.HeatMasks.from_masks(Masks.load(city))
+
+
+def heat_overview(city):
+    """Dates, seasons and cell geometry of the heat section (None when there is no Landsat date)."""
+    scenes = heat_scenes(city)
+    if not scenes:
+        return None
+    try:
+        hm = heat_masks(city)
+    except (OSError, ValueError, KeyError):
+        return None
+    by_season = defaultdict(list)
+    for s in scenes:
+        by_season[s.season[::-1]].append(s)
+    seasons = []
+    for (year, season) in sorted(by_season, key=lambda ys: (ys[0], SEASON_ORDER[ys[1]])):
+        group = by_season[(year, season)]
+        seasons.append({"key": season_key(season, year), "label": season_label(season, year), "count": len(group),
+                        "mean_lst": round(median(s.mean_lst for s in group), 1),
+                        "air_tmax": _mean(s.air_tmax for s in group), "normal_tmax": _mean(s.normal_tmax for s in group)})
+    return {
+        "grid": hm.geometry(),
+        "cells": hm.cells.tolist(),
+        "tree_share": _cells_json(hm.tree_share, 2),
+        "green_share": _cells_json(hm.green_share, 2),
+        "dates": [{"date": s.date.isoformat(), "season": s.season_label, "valid": round(s.valid_fraction, 2),
+                   "mean_lst": round(s.mean_lst, 1), "air_tmax": s.air_tmax, "normal_tmax": s.normal_tmax}
+                  for s in scenes],
+        "seasons": seasons,
+    }
+
+
+def parse_heat_key(key):
+    """"2025-07-10" -> ("date", date); "2025-summer" -> ("season", (2025, "summer")); else None."""
+    try:
+        if len(key) == 10:
+            return "date", date.fromisoformat(key)
+        year, season = key.split("-")
+        if season in SEASON_LABELS:
+            return "season", (int(year), season)
+    except ValueError:
+        pass
+    return None
+
+
+def heat_layer_scenes(city, mode, key):
+    """(scenes, other years' scenes of the same season) of a layer, or None when the key is unknown."""
+    parsed = parse_heat_key(key)
+    if parsed is None or mode not in heat.MODES:
+        return None
+    kind, value = parsed
+    scenes = heat_scenes(city)
+    if kind == "date":
+        if mode == "normal":
+            return None
+        chosen = [s for s in scenes if s.date == value]
+        return (chosen, []) if chosen else None
+    year, season = value
+    chosen = [s for s in scenes if s.season == (season, year)]
+    others = [s for s in scenes if s.season[0] == season and s.season[1] != year]
+    return (chosen, others) if chosen else None
+
+
+def heat_layer(city, mode, key, chosen, others):
+    """Cell values of one map layer, with the NDVI of the same season for the vegetation chart."""
+    from .pipeline import Masks
+    values = heat.layer(mode, chosen, others)
+    masks = Masks.load(city)
+    hm = heat.HeatMasks.from_masks(masks)
+    season, year = chosen[0].season
+    ndvi = None
+    composite, _ = season_composite(city, year, season)
+    if composite is not None:
+        land = np.where(composite > 0, composite, np.nan)  # water (NDVI < 0) left out like in the heat cells
+        ndvi = heat.cell_mean(land, heat.NDVI_FACTOR, hm.cell_grid.shape, masks.inside)
+        ndvi[~hm.cells] = np.nan
+    return {
+        "mode": mode, "key": key, "dates": [s.date.isoformat() for s in chosen],
+        "other_years": sorted({s.season[1] for s in others}) if mode == "normal" else [],
+        "values": None if values is None else _cells_json(values, 2),
+        "ndvi": None if ndvi is None else _cells_json(ndvi, 3),
+        "air_tmax": _mean(s.air_tmax for s in chosen), "normal_tmax": _mean(s.normal_tmax for s in chosen),
+        "message": "" if values is not None else "Pas d'autre année avec cette saison pour calculer une normale.",
+    }

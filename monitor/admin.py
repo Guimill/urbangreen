@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import City, Observation, Scene
+from .models import City, HeatScene, Observation, Scene
 
 
 @admin.register(City)
@@ -24,3 +24,10 @@ class SceneAdmin(admin.ModelAdmin):
     list_filter = ("status", "city")
     date_hierarchy = "date"
     inlines = [ObservationInline]
+
+
+@admin.register(HeatScene)
+class HeatSceneAdmin(admin.ModelAdmin):
+    list_display = ("city", "date", "status", "cloud_cover", "valid_fraction", "mean_lst", "air_tmax", "normal_tmax")
+    list_filter = ("status", "city")
+    date_hierarchy = "date"

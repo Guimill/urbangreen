@@ -163,7 +163,7 @@ details summary h2 { margin-left: 0.3rem; }
   .tile__value { font-size: 1.6rem; }
   .chart--line { height: 320px; padding: 0.5rem; }
   .map-tools label { width: 100%; justify-content: space-between; }
-  .map-tools select { flex: 1; }
+  .map-tools select { flex: 1; min-width: 0; width: 0; }
 }
 .leaflet-image-layer.pixelated { image-rendering: pixelated; }
 

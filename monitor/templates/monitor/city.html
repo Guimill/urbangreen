@@ -108,6 +108,83 @@
 </section>
 {% endif %}
 
+<section id="chaleur" aria-labelledby="heat-title">
+  <h2 id="heat-title">Îlots de chaleur</h2>
+  {% if heat_count %}
+  <p class="muted">Température de surface (sols, toits, feuillages) mesurée par Landsat 8 et 9 vers 12&nbsp;h 50 (heure d'été),
+    moyennée sur des carrés de 200&nbsp;m. Elle est plus élevée que celle de l'air en été, mais ses écarts entre quartiers ont les mêmes causes :
+    surfaces minérales, manque d'arbres, absence d'eau.</p>
+  <div class="map-tools">
+    <label>Comparer chaque carré
+      <select id="heat-mode">
+        <option value="city">à la moyenne de la commune (îlot de chaleur)</option>
+        <option value="normal">à la même saison des autres années</option>
+        <option value="lst">à rien : température de surface (°C)</option>
+      </select>
+    </label>
+    <label>Période
+      <select id="heat-period">
+        <option value="season">Une saison (médiane des dates)</option>
+        <option value="date">Une date</option>
+      </select>
+    </label>
+    <label id="heat-date-wrap" hidden>Date <select id="heat-date"></select></label>
+    <label>Opacité <input id="heat-opacity" type="range" min="0.2" max="1" step="0.1" value="0.8"></label>
+  </div>
+  <div class="map-layout">
+    <div id="heat-clocks" class="clocks" aria-label="Choix de la saison"></div>
+    <div class="map-wrap">
+      <div id="heat-map" class="map" aria-label="Carte des températures de surface par carrés de 200 m"></div>
+      <div id="heat-legend" class="legend"></div>
+    </div>
+  </div>
+  <div class="tiles" id="heat-tiles" aria-live="polite"></div>
+
+  <h3>Végétation et chaleur</h3>
+  <p class="muted">Chaque point est un carré de 200&nbsp;m : sa végétation (horizontalement) et sa valeur sur la carte (verticalement).
+    La droite est la tendance moyenne ; sa pente dit de combien un quartier plus végétal est plus frais.</p>
+  <div class="map-tools">
+    <label>Végétation
+      <select id="heat-x">
+        <option value="ndvi">NDVI de la même saison (Sentinel-2)</option>
+        <option value="tree_share">Part d'arbres et bois (OpenStreetMap)</option>
+        <option value="green_share">Part d'espaces verts cartographiés (OpenStreetMap)</option>
+      </select>
+    </label>
+  </div>
+  <div class="chart chart--line"><canvas id="heat-scatter" role="img" aria-label="Température de chaque carré selon sa végétation"></canvas></div>
+  <p id="heat-scatter-empty" class="muted" hidden>Pas de NDVI Sentinel-2 pour cette saison : choisissez une part OpenStreetMap.</p>
+
+  <details>
+    <summary><h3 class="inline">Dates Landsat ({{ heat_scenes|length }})</h3></summary>
+    <p class="muted">Température de l'air : maximum du jour au centre de la commune (Open-Meteo, réanalyse ERA5) ; normale : moyenne 1991-2020 du même jour de l'année.</p>
+    <div class="table-scroll">
+      <table class="plain">
+        <thead><tr><th scope="col">Date</th><th scope="col">Saison</th><th scope="col">État</th><th scope="col" class="num">Visible</th>
+          <th scope="col" class="num">Surface (moy.)</th><th scope="col" class="num">Air (max)</th><th scope="col" class="num">Normale</th><th scope="col">Remarque</th></tr></thead>
+        <tbody>
+          {% for s in heat_scenes %}
+            <tr>
+              <td>{% if s.status == 'ok' %}<a href="#heat-title" data-heat-date="{{ s.date|date:'Y-m-d' }}" class="show-heat-date">{{ s.date|date:"d/m/Y" }}</a>{% else %}{{ s.date|date:"d/m/Y" }}{% endif %}</td>
+              <td>{{ s.season_label }}</td>
+              <td>{% if s.status == 'ok' %}✓ retenue{% elif s.status == 'skipped' %}écartée{% else %}erreur{% endif %}</td>
+              <td class="num">{{ s.valid_fraction|percent }}</td>
+              <td class="num">{% if s.mean_lst is not None %}{{ s.mean_lst|decimal:1 }} °C{% else %}–{% endif %}</td>
+              <td class="num">{% if s.air_tmax is not None %}{{ s.air_tmax|decimal:1 }} °C{% else %}–{% endif %}</td>
+              <td class="num">{% if s.normal_tmax is not None %}{{ s.normal_tmax|decimal:1 }} °C{% else %}–{% endif %}</td>
+              <td class="muted">{{ s.message }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% else %}
+  <p class="muted">Pas encore de températures pour cette commune.{% if can_edit %} Lancez l'analyse « Chaleur » ci-dessous : environ 10 ans
+    d'images Landsat 8/9, quelques minutes.{% endif %}</p>
+  {% endif %}
+</section>
+
 <section aria-labelledby="cat-title">
   <h2 id="cat-title">Catégories</h2>
   <div class="table-scroll">
@@ -130,6 +207,7 @@
 
 <section id="analyse" aria-labelledby="run-title">
   <h2 id="run-title">Lancer une analyse</h2>
+  <h3>Végétation (Sentinel-2)</h3>
   <p class="muted">Les dates déjà traitées ne sont pas retéléchargées : relancer l'analyse sur une période plus récente suffit pour suivre la commune.</p>
   {% if can_edit %}
   <form method="post" action="{% url 'monitor:run' city.code %}" class="run-form">
@@ -140,7 +218,19 @@
         {% if field.help_text %}<small class="muted">{{ field.help_text }}</small>{% endif %}
       </div>
     {% endfor %}
-    <button class="btn btn--primary" type="submit" {% if city.is_running %}disabled{% endif %}>Analyser</button>
+    <button class="btn btn--primary" type="submit" {% if city.is_running %}disabled{% endif %}>Analyser la végétation</button>
+  </form>
+  <h3>Chaleur (Landsat 8/9)</h3>
+  <p class="muted">Températures de surface, carrés de 200&nbsp;m, température de l'air et normales Open-Meteo.</p>
+  <form method="post" action="{% url 'monitor:run_heat' city.code %}" class="run-form">
+    {% csrf_token %}
+    {% for field in heat_form %}
+      <div class="field">
+        {{ field.label_tag }} {{ field }}
+        {% if field.help_text %}<small class="muted">{{ field.help_text }}</small>{% endif %}
+      </div>
+    {% endfor %}
+    <button class="btn btn--primary" type="submit" {% if city.is_running %}disabled{% endif %}>Analyser la chaleur</button>
   </form>
   {% else %}
   <p class="notice">Le lancement des analyses est réservé aux administrateurs du site.
@@ -180,6 +270,9 @@
     <li>Les pixels nuageux, ombrés, enneigés ou sans donnée sont écartés grâce à la classification de scène (SCL) ; une date n'est retenue que si au moins 60&nbsp;% de la commune est visible. L'eau est exclue des moyennes.</li>
     <li>Les catégories viennent d'OpenStreetMap ; un pixel recouvert par plusieurs objets est attribué dans l'ordre arbres → parcs → autres espaces verts → agricole. Les arbres isolés comptent pour un disque de 4&nbsp;m de rayon.</li>
     <li>Les saisons sont météorologiques ; chaque valeur saisonnière est la médiane des dates de la saison, pour qu'une image un peu voilée ne la fausse pas.</li>
+    <li>Chaleur : bande thermique de Landsat 8 et 9 (collection 2 niveau 2, température de surface, 100&nbsp;m natif), nuages, ombres, neige et eau écartés grâce à la bande QA. Moyenne par carré de 200&nbsp;m si au moins la moitié du carré est visible ; date retenue si 60&nbsp;% de la commune l'est.</li>
+    <li>Îlot de chaleur : pour chaque date, écart de chaque carré à la moyenne de la commune ce jour-là, puis médiane des dates de la saison. Cela retire l'effet de la météo du jour : seul reste ce qui tient au quartier.</li>
+    <li>Normale d'un carré : médiane des dates de la même saison dans toutes les autres années téléchargées. Normale de l'air : moyenne 1991-2020 de la température maximale du même jour (Open-Meteo, ERA5, une valeur pour toute la commune).</li>
   </ul>
 </section>
 {% endblock %}
@@ -191,4 +284,5 @@
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 <script src="{% static 'monitor/clock.js' %}"></script>
 <script src="{% static 'monitor/city.js' %}"></script>
+<script src="{% static 'monitor/heat.js' %}"></script>
 {% endblock %}

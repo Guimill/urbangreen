@@ -22,4 +22,7 @@ urlpatterns = [
     path("communes/<str:code>/saison/<str:key>.png", views.season_png, name="season_png"),
     path("communes/<str:code>/ecart/<str:a>/<str:b>.png", views.diff_png, name="diff_png"),
     path("communes/<str:code>/categories.png", views.categories_png, name="categories_png"),
+    path("communes/<str:code>/analyser-chaleur/", views.run_heat, name="run_heat"),
+    path("communes/<str:code>/chaleur.json", views.heat_data, name="heat_data"),
+    path("communes/<str:code>/chaleur/<str:mode>/<str:key>.json", views.heat_layer, name="heat_layer"),
 ]

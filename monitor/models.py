@@ -101,3 +101,41 @@ class Observation(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["scene", "category"], name="observation_scene_category_unique")]
+
+
+class HeatScene(models.Model):
+    """One Landsat 8/9 date over a city: surface temperature averaged on 200 m cells."""
+
+    OK, SKIPPED, ERROR = Scene.OK, Scene.SKIPPED, Scene.ERROR
+
+    city = models.ForeignKey(City, on_delete=models.CASCADE, related_name="heat_scenes")
+    date = models.DateField()
+    items = models.JSONField("produits Landsat", default=list)
+    cloud_cover = models.FloatField("nuages annoncés (%)", null=True)
+    valid_fraction = models.FloatField("part de la commune exploitable", null=True)
+    status = models.CharField(max_length=10, default=OK)
+    message = models.TextField(blank=True)
+    mean_lst = models.FloatField("température de surface moyenne (°C)", null=True)
+    air_tmax = models.FloatField("température max. de l'air ce jour (°C)", null=True)
+    normal_tmax = models.FloatField("normale 1991-2020 de ce jour (°C)", null=True)
+    processed_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["date"]
+        verbose_name = "date Landsat"
+        constraints = [models.UniqueConstraint(fields=["city", "date"], name="heatscene_city_date_unique")]
+
+    def __str__(self):
+        return f"{self.city.name} {self.date} (chaleur)"
+
+    @property
+    def season(self):
+        return season_of(self.date)
+
+    @property
+    def season_label(self):
+        return season_label(*self.season)
+
+    @property
+    def heat_path(self) -> Path:
+        return self.city.raster_dir / "heat" / f"{self.date.isoformat()}.npz"

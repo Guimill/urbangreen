@@ -81,6 +81,12 @@ RASTER_ROOT = DATA_DIR / "rasters"
 STAC_URL = os.environ.get("STAC_URL", "https://earth-search.aws.element84.com/v1")
 STAC_COLLECTION = os.environ.get("STAC_COLLECTION", "sentinel-2-c1-l2a")
 
+# Heat islands: Landsat 8/9 Collection 2 Level-2 (surface temperature) from Microsoft Planetary
+# Computer (free, no account; asset URLs are signed with an anonymous SAS token)
+HEAT_STAC_URL = os.environ.get("HEAT_STAC_URL", "https://planetarycomputer.microsoft.com/api/stac/v1")
+HEAT_COLLECTION = os.environ.get("HEAT_COLLECTION", "landsat-c2-l2")
+HEAT_SIGN_URL = os.environ.get("HEAT_SIGN_URL", "https://planetarycomputer.microsoft.com/api/sas/v1/token/landsat-c2-l2")
+
 # The OpenStreetMap tile servers refuse requests without a Referer header (tile usage policy).
 # Django's default ("same-origin") strips it on cross-origin requests; send only the origin instead.
 SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"

@@ -106,7 +106,8 @@ Command line (handy for a cron job):
 .\.venv\Scripts\python manage.py monitor_city 49007 --start 2025-01-01 --end 2025-12-31 --per-month 4
 .\.venv\Scripts\python manage.py monitor_city Nantes --refresh-osm          # re-download OSM green spaces
 .\.venv\Scripts\python manage.py diagnose_trees Angers --output docs/arbres-angers.md   # section 3
-.\.venv\Scripts\python manage.py test monitor                              # 28 tests, no network
+.\.venv\Scripts\python manage.py monitor_heat Angers                       # heat islands, 10 years (section 4)
+.\.venv\Scripts\python manage.py test monitor                              # 43 tests, no network
 ```
 
 A commune of ~50 km² over two years takes about 10 minutes and 15 MB.
@@ -272,17 +273,100 @@ lawn does not change must give **no** pixel greener in winter. All pass.
 
 ---
 
-## 4. Reference
+## 4. Heat islands
+
+The **Îlots de chaleur** section of a commune page cuts the commune into **200 m squares** and
+compares the temperature of each square with the rest of the commune, or with the same season
+in other years.
+
+### Which temperature
+
+There is no free source of *air* temperature at 200 m. Weather reanalyses (ERA5, served by
+Open-Meteo) give one value per 9–25 km, so one value for the whole city, and Météo-France
+stations are a handful of points. What satellites do measure finely is the **surface
+temperature**: the thermal band of **Landsat 8 and 9** (100 m native, delivered at 30 m), taken
+at about 12:50 summer time, every 8 days at best.
+
+Surface temperature is not air temperature: in summer a car park can be at 45 °C under 28 °C
+air. But its differences between neighbourhoods have the same causes (mineral surfaces, few
+trees, no water), which is why it is the standard way of mapping urban heat islands (*surface
+urban heat island*, SUHI).
+
+Air temperature is still used, as context. For every image date the app stores that day's
+maximum air temperature at the city centre and the **1991-2020 normal** of that calendar day,
+both from Open-Meteo (ERA5). That says whether an image was taken on a heat-wave day or an
+ordinary one.
+
+### The three comparisons
+
+| Choice on the page | Value of a square | Answers |
+|---|---|---|
+| *à la moyenne de la commune* | for each date, square − mean of the commune that day; then the median over the dates of the season | where are the heat islands? The day's weather cancels out: a hot day and a mild day give the same map. |
+| *à la même saison des autres années* | median temperature of the season − median of the same season in all other downloaded years | was this summer hotter than usual here, and where did it change (new buildings, felled or planted trees)? Season only. |
+| *à rien* | median surface temperature (°C) | raw values |
+
+The **season clock** picks the season; *Période → Une date* shows a single image. The tiles
+under the map give:
+- the hot/cold contrast (90th − 10th percentile of the squares);
+- the air temperature of the image days against the normal;
+- the **effect of vegetation**: slope of temperature against NDVI.
+
+### Vegetation and heat
+
+The scatter plot puts every square by its vegetation (x) against its temperature (y). Vegetation
+can be:
+- the Sentinel-2 NDVI of the same season (this includes private gardens, which OpenStreetMap does
+  not map);
+- the share of OSM trees in the square;
+- the share of all OSM green spaces in the square.
+
+First results for Angers, summer 2025 (10 dates) and summer 2026 (14 dates):
+
+| | Summer 2025 | Summer 2026 |
+|---|---:|---:|
+| Contrast, hottest 10 % − coolest 10 % of squares | 10.1 °C | 7.9 °C |
+| Effect of +0.1 NDVI on a square | −2.1 °C (r² 0.70) | −1.9 °C (r² 0.63) |
+| Air max. on image days / 1991-2020 normal | 29.9 / 23.6 °C | 30.9 / 24.3 °C |
+
+Summer 2022 comes out at +2.5 °C (median square) over the other summers.
+
+### Limits
+
+- **Clear-sky bias.** Landsat sees only cloud-free days, which are hotter than average (about
+  +6 °C of air at Angers in summer). The "normal" of a square is therefore the normal of
+  *sunny* days of that season. The comparison with the city mean is not affected.
+- **One time of day.** Surface heat at about 12:50 is not night-time heat, when heat islands
+  hurt health most. Night-time thermal images (ECOSTRESS, Landsat night passes) are rare and not
+  used here.
+- **Resolution.** 100 m native, so a 200 m square averages a few true pixels. Single streets
+  are not resolved, but blocks and neighbourhoods are.
+- **Water** pixels (Landsat QA) are left out: a river is cool for reasons unrelated to the urban
+  fabric. A square that is mostly water has no value.
+
+### Cost
+
+Searching and reading uses Microsoft Planetary Computer (free, anonymous; URLs are signed with a
+temporary token that the app fetches by itself). Each date takes about 1 s and a few KB on disk:
+`heat/<date>.npz` holds one float16 per square. Ten years for Angers came to 305 dates, of which
+212 were kept, in a few minutes. The 30-year normals are downloaded once per commune, to
+`heat/normals.json`.
+
+---
+
+## 5. Reference
 
 **Data and storage**
 
 - `data/db.sqlite3`: communes, dates (`Scene`), statistics per category (`Observation`).
 - `data/rasters/<INSEE>/`: `masks.npz` (commune + categories), `ndvi/<date>.npz` (NDVI × 100 in
-  int8) and `cache/` (map PNGs, rebuilt automatically).
+  int8), `heat/<date>.npz` (surface temperature per 200 m square), `heat/normals.json` (air
+  normals) and `cache/` (map PNGs and heat layers, rebuilt automatically).
+- `HeatScene`: one Landsat date, with the mean surface temperature, the day's maximum air
+  temperature and its normal.
 
 **Settings (environment variables)**: `SECRET_KEY`, `DEBUG` (1/0), `ALLOWED_HOSTS`,
 `CSRF_TRUSTED_ORIGINS`, `WRITE_REQUIRES_LOGIN` (1 = only staff can add/analyse), `DATA_DIR`,
-`STAC_URL`, `STAC_COLLECTION`.
+`STAC_URL`, `STAC_COLLECTION`, `HEAT_STAC_URL`, `HEAT_COLLECTION`, `HEAT_SIGN_URL`.
 
 **Code**
 
@@ -295,8 +379,11 @@ lawn does not change must give **no** pixel greener in winter. All pass.
 | `monitor/services/pipeline.py` | chains everything (command and *Analyser* button) |
 | `monitor/services/analysis.py` | seasonal medians and composites for the pages |
 | `monitor/services/trees.py` | the "trees in winter" diagnosis (section 3) |
+| `monitor/services/heat.py` | Landsat surface temperature, 200 m squares, air normals, map layers (section 4) |
 | `monitor/static/monitor/clock.js` | the season clock |
 | `monitor/static/monitor/city.js` | map, table and charts of the commune page |
+| `monitor/static/monitor/heat.js` | heat island map, key figures and vegetation/heat chart |
 
-Data: Copernicus Sentinel-2 (ESA) · © OpenStreetMap contributors (ODbL) · geo.api.gouv.fr ·
+Data: Copernicus Sentinel-2 (ESA) · Landsat 8/9 (USGS/NASA, via Microsoft Planetary Computer) ·
+© OpenStreetMap contributors (ODbL) · geo.api.gouv.fr ·
 weather Open-Meteo (CC BY 4.0).
