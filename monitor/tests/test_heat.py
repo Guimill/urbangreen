@@ -230,3 +230,27 @@ class HeatPipelineTests(TestCase):
             self.client.post(url, form)
             start.assert_called_once()
             self.assertIs(start.call_args.kwargs["job"], pipeline.update_heat)
+
+
+class RefreshAllTests(TestCase):
+    def test_retries_errors_and_keeps_going(self):
+        from io import StringIO
+        from unittest import mock
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+        from monitor.models import HeatScene
+        angers = City.objects.create(code="49007", name="Angers", department="49", population=1, geometry=COMMUNE)
+        City.objects.create(code="44109", name="Nantes", department="44", population=1, geometry=COMMUNE)
+        HeatScene.objects.create(city=angers, date=date(2022, 8, 2), status=HeatScene.ERROR)
+        HeatScene.objects.create(city=angers, date=date(2022, 8, 10), status=HeatScene.OK)
+        calls = []
+        def boom(city, start, end, log):
+            calls.append(("heat", city.code))
+            if city.code == "49007":
+                raise RuntimeError("Planetary Computer down")
+        with mock.patch.object(pipeline, "update_city", lambda city, start, end, log: calls.append(("ndvi", city.code))), \
+                mock.patch.object(pipeline, "update_heat", boom):
+            with self.assertRaisesMessage(CommandError, "Angers (49007) (chaleur)"):
+                call_command("refresh_all", stdout=StringIO(), stderr=StringIO())
+        self.assertEqual(calls, [("ndvi", "49007"), ("heat", "49007"), ("ndvi", "44109"), ("heat", "44109")])
+        self.assertEqual(list(angers.heat_scenes.values_list("status", flat=True)), [HeatScene.OK])

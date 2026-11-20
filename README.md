@@ -107,7 +107,8 @@ Command line (handy for a cron job):
 .\.venv\Scripts\python manage.py monitor_city Nantes --refresh-osm          # re-download OSM green spaces
 .\.venv\Scripts\python manage.py diagnose_trees Angers --output docs/arbres-angers.md   # section 3
 .\.venv\Scripts\python manage.py monitor_heat Angers                       # heat islands, 10 years (section 4)
-.\.venv\Scripts\python manage.py test monitor                              # 43 tests, no network
+.\.venv\Scripts\python manage.py refresh_all                              # every commune, both analyses (server cron, every 3 months)
+.\.venv\Scripts\python manage.py test monitor                              # 44 tests, no network
 ```
 
 A commune of ~50 km² over two years takes about 10 minutes and 15 MB.
